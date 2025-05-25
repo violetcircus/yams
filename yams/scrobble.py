@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 
-import atexit
-import hashlib
-import os
-import logging
-import importlib.metadata
-from pathlib import Path
-import platformdirs
-import select
-from sys import exit
-import time
+import requests, hashlib
 import xml.etree.ElementTree as ET
-
-import requests
 from mpd import MPDClient
 from mpd.base import ConnectionError
+import select
+from pathlib import Path
+import time
+import logging
 import yaml
+import os
+from sys import exit
 
-from yams.configure import configure, remove_log_stream_of_type, DEFAULT_CACHE_FILENAME
+from yams.configure import configure, remove_log_stream_of_type
+import yams
 
 MAX_TRACKS_PER_SCROBBLE = 50
 SCROBBLE_RETRY_INTERVAL = 10
@@ -25,9 +21,7 @@ SCROBBLE_DISK_SAVE_INTERVAL = 1200
 
 logger = logging.getLogger("yams")
 
-SCROBBLES = str(
-    Path(platformdirs.user_cache_dir(appname="yams"), DEFAULT_CACHE_FILENAME)
-)
+SCROBBLES = str(Path(Path.home(), ".config/yams/scrobbles.cache"))
 
 
 def save_failed_scrobbles_to_disk(path, scrobbles):
@@ -253,17 +247,17 @@ def save_credentials(session_filepath, user_name, session_key):
 
 def extract_single(container, key):
     """
-        Sometimes mpd will report an array inside its track info (e.g. 3 artists instead of 1)
-    In cases like these it makes sense to always extract the first, this function does that.
-        Also prevents crashing if something's gone wrong.
+    Sometimes mpd will report an array inside its track info (e.g. 3 artists instead of 1)
+In cases like these it makes sense to always extract the first, this function does that.
+    Also prevents crashing if something's gone wrong.
 
-        :param container: The dictionary being searched
-        :param key: The key to use in the dict
+    :param container: The dictionary being searched
+    :param key: The key to use in the dict
 
-        :type container: dict
-        :type key: object
+    :type container: dict
+    :type key: object
 
-        :rtype: object
+    :rtype: object
     """
 
     if key in container:
@@ -322,6 +316,15 @@ def now_playing(track_info, status, url, api_key, api_secret, session_key):
         logger.warn("Could not send now playing Last.FM!")
         logger.debug("Error: {}".format(e))
 
+def cut_artist(artist):
+    comma = artist.find(",")
+    slash = artist.find("/")
+    if (comma > 0):
+        if (slash == -1 or comma > slash):
+            return (artist[0:comma])
+    elif (slash > 0):
+        if (comma == -1 or slash > comma):
+            return (artist[0:slash])
 
 def make_scrobble(track_info, status, api_secret=None, **other):
     """
@@ -341,7 +344,7 @@ def make_scrobble(track_info, status, api_secret=None, **other):
     """
 
     scrobble = {
-        "artist": extract_single(track_info, "artist"),
+        "artist": cut_artist(extract_single(track_info, "artist")),
         "track": extract_single(track_info, "title"),
     }
 
@@ -349,8 +352,6 @@ def make_scrobble(track_info, status, api_secret=None, **other):
         scrobble["album"] = extract_single(track_info, "album")
     if "track" in track_info:
         scrobble["trackNumber"] = extract_single(track_info, "track")
-    if "albumartist" in track_info:
-        scrobble["albumArtist"] = extract_single(track_info, "albumartist")
     # Check for duration/time in status rather than track_info as they won't be present for tracks not
     # present in the mpd database (ie. streamed tracks)
     if "duration" in status:
@@ -423,10 +424,6 @@ def scrobble_tracks(tracks, url, api_key, api_secret, session_key):
                 tracks[i], "trackNumber"
             )
 
-        if "albumArtist" in tracks[i]:
-            parameters["albumArtist[{}]".format(i)] = extract_single(
-                tracks[i], "albumArtist"
-            )
         if "duration" in tracks[i]:
             parameters["duration[{}]".format(i)] = extract_single(tracks[i], "duration")
 
@@ -643,7 +640,7 @@ def mpd_wait_for_play(client):
             # We're not 'play'ing, so lets wait until the state changes
             changes = client.idle("player")
             logger.info(
-                "Received event in subsystem: {}".format(changes)
+                "Recieved event in subsystem: {}".format(changes)
             )  # handle changes
 
             # The state has now changed
@@ -918,7 +915,7 @@ def mpd_watch_track(client, session, config):
                             reject_track = title
                     else:
                         logger.warn(
-                            "Can't scrobble yet, time elapsed ({}s) < adjusted duration ({}s)".format(
+                            "Can't scrobble yet, time elapsed ({}s) < adjustted duration ({}s)".format(
                                 real_time_elapsed,
                                 (scrobble_threshold / 100) * song_duration,
                             )
@@ -1000,13 +997,6 @@ def save_pid(file_path, pid=None):
         pid_file.writelines(str(pid) + "\n")
         logger.info("Wrote PID to file: {}".format(file_path))
 
-    atexit.register(rm_pid_atexit, Path(file_path))
-
-
-def rm_pid_atexit(pid_file_path):
-    "Delete pid file atexit handler"
-    pid_file_path.unlink()
-
 
 def fork(config):
     """
@@ -1057,13 +1047,11 @@ def connect_to_mpd(host, port):
 
 
 def cli_run():
-    """Command line entrypoint"""
+    """ Command line entrypoint """
 
     session = ""
     config = configure()
-    logger.info(
-        "Starting up YAMS v{}".format(importlib.metadata.version("YAMScrobbler"))
-    )
+    logger.info("Starting up YAMS v{}".format(yams.VERSION))
 
     session_file = config["session_file"]
     base_url = config["base_url"]
@@ -1080,10 +1068,6 @@ def cli_run():
         session_file, base_url, api_key, api_secret, interactive_shell_available
     )
 
-    keep_alive = config["keep_alive"] if "keep_alive" in config else False
-
-    client = None
-
     try:
         client = connect_to_mpd(mpd_host, mpd_port)
     except Exception as e:
@@ -1092,10 +1076,7 @@ def cli_run():
                 e
             )
         )
-        if not keep_alive:
-            exit(1)
-        else:
-            logger.warn("Not dying, will keep alive and wait for MPD.")
+        exit(1)
 
     # If we're allowed to daemonize, do so
     if "no_daemon" in config:
@@ -1130,14 +1111,10 @@ def cli_run():
             except Exception:
                 logger.exception("Something went very wrong!")
                 break
-        # We have no client, so we're not connected to MPD... wait for a connection to happen, or quit.
         else:
+            time.sleep(RECONNECT_TIMEOUT)
             try:
-                time.sleep(RECONNECT_TIMEOUT)
                 client = connect_to_mpd(mpd_host, mpd_port)
-            except KeyboardInterrupt:
-                logger.info("Keyboard Interrupt detected - Exiting!")
-                break
             except Exception as e:
                 # Don't know if this is cached anywhere - could cause some large log files so I'm leaving it commented out until I know more.
                 # logger.debug("Could not connect to MPD! Check that your config is correct and that MPD is running. Error: {}".format(e))

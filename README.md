@@ -1,4 +1,4 @@
-YAMS
+Violet's YAMS fork
 ====
 
 *Yet Another MPD Scrobbler (For Last.FM)*
@@ -6,6 +6,12 @@ YAMS
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 YAMS is exactly what its name says it is.
+
+## Why fork?
+I forked yams for two reasons.
+1. I wanted an mpd scrobbler that would only submit the first artist in the artist field to last.fm, as I've been using spotify for years and years and that's how they scrobble from there.
+2. For some reason, the version of yams on the github seemed to have issues (will not update this readme, so this may not still be true if you read this in the future), so I've replaced the code with code extracted from the .whl on [pypi](https://pypi.org/project/YAMScrobbler/).
+3. I didn't want to have to do all that again if I set up mpd and scrobbling on another system, so sticking it in a fork that i can clone easily makes my life easier. Don't clone and use this, I don't care about maintaining it, just go install it from pip or original repo assuming it's fixed.
 
 ## Features
 YAMS is just your run of the mill Last.FM scrobbler. But, if you *really* need to know, it can do the following:

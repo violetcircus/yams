@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
 import argparse
 import os
-import importlib.metadata
-import logging
-from pathlib import Path
-import signal
-import subprocess
-from sys import exit
-
-import platformdirs
-import psutil
 import yaml
+import signal
+import logging
+import subprocess
+import psutil
+from yams import VERSION
+from sys import exit
 
 HOME = str(Path.home())
 LOGGING_ENABLED = False
 
 PROGRAM_HOMES = [
-    platformdirs.user_config_dir(appname="yams"),
+    "{}/.config/yams".format(HOME),
     "{}/.yams".format(HOME),
     "./.yams",
     ".",
     HOME,
 ]
 
-CREATE_IF_NOT_EXISTS_HOME = platformdirs.user_config_dir(appname="yams")
+CREATE_IF_NOT_EXISTS_HOME = "{}/.config/yams".format(HOME)
 
 CONFIG_FILE = "yams.yml"
 LOG_FILE_NAME = "yams.log"
@@ -72,7 +70,7 @@ def read_from_file(path, working_config):
 
 
 def bootstrap_config():
-    """Creates a config directory and writes a suitable base config into it"""
+    """ Creates a config directory and writes a suitable base config into it"""
 
     # No custom home directory was found, lets create one
 
@@ -81,9 +79,7 @@ def bootstrap_config():
 
     default_config = DEFAULTS
 
-    default_config["session_file"] = str(
-        Path(platformdirs.user_state_dir(appname="yams"), DEFAULT_SESSION_FILENAME)
-    )
+    default_config["session_file"] = str(Path(home, DEFAULT_SESSION_FILENAME))
 
     # Lets recognize environment variables by the user
     if "MPD_HOST" in os.environ:
@@ -97,7 +93,7 @@ def bootstrap_config():
 
 
 def get_home_dir():
-    """Returns the home directory for YAMS files (not to be confused with your system home directory"""
+    """ Returns the home directory for YAMS files (not to be confused with your system home directory """
 
     home = "."
 
@@ -219,7 +215,6 @@ def is_pid_running(config):
 
 def watch_log(path):
     logger.info("Attaching to {}, press Ctrl-C to exit.".format(path))
-    logger.info("\n\nv--- * * * Log output starts here * * * ---v\n")
 
     try:
 
@@ -239,12 +234,12 @@ def watch_log(path):
 
 
 def process_cli_args():
-    """Process command line arguments"""
+    """ Process command line arguments"""
 
     parser = argparse.ArgumentParser(
         prog="YAMS",
         description="Yet Another Mpd Scrobbler, v{}. Configuration directories are either ~/.config/yams, ~/.yams, or your current working directory. Create one of these paths if need be.".format(
-            importlib.metadata.version("YAMScrobbler")
+            VERSION
         ),
     )
     parser.add_argument(
@@ -261,9 +256,7 @@ def process_cli_args():
         "-s",
         "--session-file-path",
         type=str,
-        help="Where to read in/save your session file to. Defaults to inside your $XDG_STATE_HOME directory. (Default: '{}')".format(
-            platformdirs.user_state_dir(appname="yams")
-        ),
+        help="Where to read in/save your session file to. Defaults to inside your config directory.",
         metavar="./.lastfm_session",
     )
     parser.add_argument(
@@ -301,9 +294,7 @@ def process_cli_args():
         "-l",
         "--log-file",
         type=str,
-        help='Full path to a log file. If not set, a log file called "yams.log" will be placed in $XDG_STATE_HOME. (Default:"{}")'.format(
-            platformdirs.user_state_dir()
-        ),
+        help='Full path to a log file. If not set, a log file called "yams.log" will be placed in the current config directory.',
         default=None,
         metavar="/path/to/log",
     )
@@ -311,9 +302,7 @@ def process_cli_args():
         "-c",
         "--cache-file",
         type=str,
-        help='Full path to the scrobbles cache file. This stores failed scrobbles for upload at a later date. If not set, a log file called "scrobbles.cache" will be placed in the $XDG_CACHE_HOME. (Default:"{}")'.format(
-            platformdirs.user_cache_dir()
-        ),
+        help='Full path to the scrobbles cache file. This stores failed scrobbles for upload at a later date. If not set, a log file called "scrobbles.cache" will be placed in the current config directory.',
         default=None,
         metavar="/path/to/cache",
     )
@@ -337,11 +326,6 @@ def process_cli_args():
     )
     parser.add_argument(
         "--disable-log", action="store_true", help="Disable the log? Default: False"
-    )
-    parser.add_argument(
-        "--keep-alive",
-        action="store_true",
-        help="If set to True will not exit on initial MPD connection failure. (E.g. always reconnect) Default: False",
     )
     parser.add_argument(
         "-a",
@@ -378,12 +362,6 @@ def set_log_file(path, level=logging.INFO):
     )
     # Remove old log handlers
     remove_log_stream_of_type(logging.FileHandler)
-
-    # Not everyone will have the requisite path to make this file
-    parent_path = Path(path).parent
-
-    if not parent_path.exists():
-        parent_path.mkdir(parents=True, exist_ok=True)
 
     fh = logging.FileHandler(path)
     fh.setLevel(level)
@@ -432,26 +410,14 @@ def configure():
     setup_logger(True, False, log_level)
     home = get_home_dir()
     config_path = str(Path(home, CONFIG_FILE))
-    app_dirs = platformdirs.PlatformDirs("yams")
 
     # 1 Defaults:
     config = DEFAULTS
     # 1.2 Home dependent defaults:
-
-    config["session_file"] = str(
-        Path(app_dirs.user_state_dir, DEFAULT_SESSION_FILENAME)
-    )
-
-    # Older versions of YAMS saved their session into the user's config directory
-    potential_legacy_session = Path(app_dirs.user_config_dir, DEFAULT_SESSION_FILENAME)
-    if potential_legacy_session.exists():
-        config["session_file"] = str(potential_legacy_session)
-
-    config["log_file"] = str(Path(app_dirs.user_state_dir, LOG_FILE_NAME))
-    config["pid_file"] = str(
-        Path(platformdirs.user_runtime_dir(), DEFAULT_PID_FILENAME)
-    )
-    config["cache_file"] = str(Path(app_dirs.user_cache_dir, DEFAULT_CACHE_FILENAME))
+    config["session_file"] = str(Path(home, DEFAULT_SESSION_FILENAME))
+    config["log_file"] = str(Path(home, LOG_FILE_NAME))
+    config["pid_file"] = str(Path(home, DEFAULT_PID_FILENAME))
+    config["cache_file"] = str(Path(home, DEFAULT_CACHE_FILENAME))
     # 2 Environment variables
     if "MPD_HOST" in os.environ:
         config["mpd_host"] = os.environ["MPD_HOST"]
@@ -487,8 +453,6 @@ def configure():
         config["log_file"] = args.log_file
     if args.cache_file:
         config["cache_file"] = args.cache_file
-    if args.keep_alive:
-        config["keep_alive"] = args.keep_alive
 
     # 5 Sanity check
     if (
